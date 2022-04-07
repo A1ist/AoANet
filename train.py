@@ -47,7 +47,7 @@ def train(opt):
         best_val_score = infos.get('best_val_score', None)
 
     opt.vocab = loader.get_vocab()
-    model = models.setup()
+    model = models.setup(opt).cuda()
 
 
 
