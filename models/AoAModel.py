@@ -1,6 +1,6 @@
 import torch.nn as nn
 from .AttModel import AttModel
-from .TransformerModel import LayerNorm, clones
+from .TransformerModel import LayerNorm, clones, SubLayerConnection, PositionwiseFeedForward
 
 class MultiHeadedDotAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1, scale=1, project_k_v=1, use_output_layer=1, do_aoa=0, norm_q=0, dropout_aoa=0.3):
@@ -31,10 +31,58 @@ class MultiHeadedDotAttention(nn.Module):
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
-class AOA_Refiner_Core(nn.Module):
+class AoA_Refiner_Layer(nn.Module):
+    def __init__(self, size, self_attn, feed_forward, dropout):
+        super(AoA_Refiner_Layer, self).__init__()
+        self.attn = self_attn
+        self.feed_forward = feed_forward
+        self.use_ff = 0
+        if self.feed_forward is not None:
+            self.use_ff = 1
+        self.sublayer = clones(SubLayerConnection(size, dropout), 1+self.use_ff)
+        self.size = size
+
+class AoA_Refiner_Core(nn.Module):
     def __init__(self, opt):
-        super(AOA_Refiner_Core, self).__init__()
-        attn = MultiHeadedDotAttention(opt.num_heads,)
+        super(AoA_Refiner_Core, self).__init__()
+        attn = MultiHeadedDotAttention(opt.num_heads, opt.rnn_size, project_k_v=1, scale=opt.multi_head_scale, do_aoa=opt.refine_aoa, norm_q=0, dropout_aoa=getattr(opt, 'dropout_aoa', 0.3))
+        layer = AoA_Refiner_Layer(opt.rnn_size, attn, PositionwiseFeedForward(opt.rnn_size, 2048, 0.1) if opt.use_ff else None, 0.1)
+        self.layers = clones(layer, 6)
+        self.norm = LayerNorm(layer.size)
+
+class AoA_Decder_Core(nn.Module):
+    def __init__(self, opt):
+        super(AoA_Decder_Core, self).__init__()
+        self.drop_prob_lm = opt.drop_prob_lm
+        self.d_model = opt.rnn_size
+        self.use_multi_head = opt.use_multi_head
+        self.multi_head_scale = opt.multi_head_scale
+        self.use_ctx_drop = getattr(opt, 'ctx_drop', 0)
+        self.out_res = getattr(opt, 'out_res', 0)
+        self.decoder_type = getattr(opt, 'decoder_type', 'AoA')
+        self.att_lstm = nn.LSTMCell(opt.input_encoding_size + opt.rnn_size, opt.rnn_size)
+        self.out_drop = nn.Dropout(self.drop_prob_lm)
+        if self.decoder_type == 'AoA':
+            self.att2ctx = nn.Sequential(
+                nn.Linear(self.d_model * opt.multi_head_scale + opt.rnn_size, 2 * opt.rnn_size),
+                nn.GLU()
+            )
+        elif self.decoder_type == 'LSTM':
+            self.att2ctx = nn.LSTMCell(self.d_model * opt.multi_head_scale + opt.rnn_size, opt.rnn_size)
+        else:
+            self.att2ctx = nn.Sequential(
+                nn.Linear(self.d_model * opt.multi_head_scale + opt.rnn_size, opt.rnn_size),
+                nn.ReLU()
+            )
+        if opt.use_multi_head == 2:
+            self.attention = MultiHeadedDotAttention(opt.num_heads, opt.rnn_size, project_k_v=0, scale=opt.multi_head_scale, use_output_layer=0, do_aoa=0, norm_q=1)
+        else:
+            self.attention = Attention(opt)
+        if self.use_ctx_drop:
+            self.ctx_drop = nn.Dropout(self.drop_prob_lm)
+        else:
+            self.ctx_drop = lambda x: x
+
 
 class AoAModel(AttModel):
     def __init__(self, opt):
