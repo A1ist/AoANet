@@ -1,5 +1,5 @@
 import torch.nn as nn
-from .AttModel import AttModel
+from .AttModel import AttModel, Attention
 from .TransformerModel import LayerNorm, clones, SubLayerConnection, PositionwiseFeedForward
 
 class MultiHeadedDotAttention(nn.Module):
@@ -76,13 +76,12 @@ class AoA_Decder_Core(nn.Module):
             )
         if opt.use_multi_head == 2:
             self.attention = MultiHeadedDotAttention(opt.num_heads, opt.rnn_size, project_k_v=0, scale=opt.multi_head_scale, use_output_layer=0, do_aoa=0, norm_q=1)
-        else:
-            self.attention = Attention(opt)
+        # else:
+        #     self.attention = Attention(opt)
         if self.use_ctx_drop:
             self.ctx_drop = nn.Dropout(self.drop_prob_lm)
-        else:
-            self.ctx_drop = lambda x: x
-
+        # else:
+        #     self.ctx_drop = lambda x: x
 
 class AoAModel(AttModel):
     def __init__(self, opt):
@@ -96,6 +95,6 @@ class AoAModel(AttModel):
             del self.fc_embed
         if opt.refine:
             self.refiner = AoA_Refiner_Core(opt)
-        else:
-            self.refiner = lambda x, y: x
+        # else:
+        #     self.refiner = lambda x, y: x
         self.core = AoA_Decder_Core(opt)
