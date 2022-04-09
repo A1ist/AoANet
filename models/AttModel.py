@@ -1,8 +1,7 @@
-
 import torch.nn as nn
-from .CptionModel import CaptionModel
+from .CaptionModel import CaptionModel
 
-bad_endings = ['a','an','the','in','for','at','of','with','before','after','on','upon','near','to','is','are','am']
+bad_endings = ['a', 'an', 'the', 'in', 'for', 'at', 'of', 'with', 'before', 'after', 'on', 'upon', 'near', 'to', 'is', 'are', 'am']
 
 class AttModel(CaptionModel):
     def __init__(self, opt):
@@ -53,3 +52,11 @@ class AttModel(CaptionModel):
         self.ctx2att = nn.Linear(self.rnn_size, self.att_hid_size)
         self.vocab = opt.vocab
         self.bad_endings_ix = [int(k) for k, v in self.vocab.items() if v in bad_endings]
+
+class Attention(nn.Module):
+    def __init__(self, opt):
+        super(Attention, self).__init__()
+        self.rnn_size = opt.rnn_size
+        self.att_hid_size = opt.att_hid_size
+        self.h2att = nn.Linear(self.rnn_size, self.att_hid_size)
+        self.alpha_net = nn.Linear(self.att_hid_size, 1)
