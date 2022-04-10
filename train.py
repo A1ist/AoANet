@@ -1,6 +1,9 @@
 import misc.utils as utils
 from dataloader import *
 import models
+import torch.nn as nn
+from misc.loss_wrapper import LossWrapper
+
 try:
     import tensorboardX as tb
 except ImportError:
@@ -48,6 +51,36 @@ def train(opt):
 
     opt.vocab = loader.get_vocab()
     model = models.setup(opt).cuda()
+    del opt.vocab
+    de_model = nn.DataParallel(model)
+    lw_model = LossWrapper(model, opt)
+    dp_lw_model = nn.DataParallel(lw_model)
+    epoch_done = True
+    dp_lw_model.train()
+    if opt.reduce_on_plateau:
+        optimizer = utils.build_optimizer(model.parameters(), opt)
+        optimizer = utils.ReduceLROnPlateau(optimizer, factor=0.5, patience=3)
+    # elif opt.noamopt:
+    #     assert opt.caption_model in ['transformer', 'aoa'], 'noamopt can only work with transformer'
+    #     optimizer = utils.get_std_opt(model, factor=opt.noamopt_factor, warmup=opt.noamopt_warmup)
+    #     optimizer._step = iteration
+    # else:
+    #     optimizer = utils.build_optimizer(model.parameters(), opt)
+    if vars(opt).get('star_from', None) is not None and os.path.isfile(os.path.jion(opt.start_from, "optimizer.pth")):
+        optimizer.load_state_dict(torch.load(os.path.join(opt.start_from, "optimizer.pth")))
+
+    try:
+        while True:
+            if epoch_done:
+                if not opt.noamopt and not opt.reduce_on_plateau:
+                    if epoch > opt.learning_rate_decay_start and opt.learning_rate_decay_start >= 0:
+                        frac = (epoch - opt.learning_rate_decay_start) // opt.learning_rate_decay_every
+                        decay_factor = opt.learning_rate_decay_rate ** frac
+                        opt.current_lr = opt.learning_rate * decay_factor
+                    else:
+                        opt.current_lr = opt.learning_rate
+                    utils.set_lr(optimizer, opt.learning_lr)
+
 
 
 
