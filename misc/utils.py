@@ -1,5 +1,8 @@
 import six
 from six.moves import cPickle
+import torch.nn as nn
+import torch
+import torch.optim as optim
 
 def if_use_feat(caption_model):
     if caption_model in ['show_tell', 'all_img', 'fc', 'newfc']:
@@ -17,3 +20,103 @@ def pickle_load(f):
         return cPickle.load(f, encoding='latin-1')
     else:
         return cPickle.load(f)
+
+class LabelSmoothing(nn.Module):
+    def __init__(self, size=0, padding_idx=0, smoothing=0.0):
+        super(LabelSmoothing, self).__init__()
+        self.criterion = nn.KLDivLoss(reduction='none')
+        self.confidence = 1.0 - smoothing
+        self.smoothing = smoothing
+        self.true_dist = None
+
+class LanguageModelCriterion(nn.Module):
+    def __init__(self):
+        super(LanguageModelCriterion, self).__init__()
+
+class RewardCriterion(nn.Module):
+    def __init__(self):
+        super(RewardCriterion, self).__init__()
+
+class NoamOpt(object):
+    def __init__(self, model_size, factor, warmup, optimizer):
+        self.optimizer = optimizer
+        self._step = 0
+        self.warmup = warmup
+        self.factor = factor
+        self.model_size = model_size
+        self._rate = 0
+
+def get_std_opt(model, factor=1, warmup=2000):
+    Noam_Opt = NoamOpt(
+        model.model.tat_embed[0].d_model,
+        factor,
+        warmup,
+        torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9)
+    )
+    return Noam_Opt
+
+def build_optimizer(params, opt):
+    if opt.optim == 'adma':
+        optimer = optim.Adam(
+            params,
+            opt.learing_rate,
+            (opt.optim_alpha, opt.optim_beta),
+            opt.optim_epsilon,
+            weight_decay=opt.weight_decay
+        )
+        return optimer
+    # elif opt.optim == 'rmsprop':
+    #     optimer = optim.RMSprop(
+    #         params,
+    #         opt.learing_rate,
+    #         opt.optim_alpha,
+    #         opt.optim_epsilon,
+    #         weight_decay=opt.weight_decay
+    #     )
+    #     return optimer
+    # elif opt.optim == 'adagrad':
+    #     optimer = optim.Adagrad(
+    #         params,
+    #         opt.learing_rate,
+    #         weight_decay=opt.weight_decay
+    #     )
+    #     return optimer
+    # elif opt.optim == 'sgd':
+    #     optimer = optim.SGD(
+    #         params,
+    #         opt.learing_rate,
+    #         weight_decay=opt.weight_decay
+    #     )
+    #     return optimer
+    # elif opt.optim == 'sgdm':
+    #     optimer = optim.SGD(
+    #         params,
+    #         opt.learing_rate,
+    #         opt.optim_alpha,
+    #         weight_decay=opt.weight_decay
+    #     )
+    #     return optimer
+    # elif opt.optim == 'sgdmom':
+    #     optimer = optim.SGD(
+    #         params, opt.learing_rate,
+    #         opt.optim_alpha,
+    #         weight_decay=opt.weight_decay,
+    #         nesterov=True
+    #     )
+    #     return optimer
+    # else:
+    #     raise Exception("bad option opt.optim: {}".format(opt.optim))
+
+def get_lr(optimizer):
+    for group in optimizer.param_grous:
+        return group['lr']
+
+class ReduceLROnPlateau(object):
+    def __init__(self, optimizer, mode='min', factor=0.1, patience=10, verbose=False, threshold=0.0001,
+                 threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08):
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode, factor, patience, verbose, threshold, threshold_mode, cooldown, min_lr, eps
+        )
+        self.optimizer = optimizer
+        self.current_lr = get_lr(optimizer)
+
