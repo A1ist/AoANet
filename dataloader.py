@@ -5,6 +5,7 @@ import numpy as np
 import lmdb
 import os
 import torch
+import six
 
 class HybridLoader:
     def __init__(self, db_path, ext):
@@ -31,6 +32,20 @@ class HybridLoader:
             print("HybridLoader:ext is ignored")
         else:
             self.db_type = 'dir'
+
+    def get(self, key):
+        if self.db_type == 'pth':
+            f_input = self.feat_file[key]
+        elif self.db_type == 'lmdb':
+            env = self.env
+            with env.begin(write=False) as txn:
+                byteflow = txn.get(key)
+            f_input = six.BytesIO(byteflow)
+        else:
+            f_input = os.path.join(self.db_path, key + self.ext)
+        feat = self.loader(f_input)
+        return feat
+
 class BlobFetcher():
     def __init__(self, split, dataloader, if_shuffle=False):
         self.split = split
@@ -104,5 +119,95 @@ class DataLoader(data.Dataset):
 
     def get_vocab(self):
         return self.ix_to_word
+
+    def get_batch(self, split, batch_size=None):
+        batch_size = batch_size or self.batch_size
+        seq_per_img = self.seq_per_img
+        fc_batch = []
+        att_batch = []
+        label_batch = []
+        wrapped = False
+        infos = []
+        gts = []
+        for i in range(batch_size):
+            tmp_fc, tmp_att, tmp_seq, ix, tmp_wrapped = self._prefetch_process[split].get()
+            if tmp_wrapped:
+                wrapped = True
+            fc_batch.append(tmp_fc)
+            att_batch.append(tmp_att)
+            tmp_label = np.zeros([seq_per_img, self.seq_length + 2], dtype='int')
+            if hasattr(self, 'h5_label_file'):
+                tmp_label[:, 1: self.seq_length + 1] = tmp_seq
+            label_batch.append(tmp_label)
+            if hasattr(self, 'h5_label_file'):
+                gts.append(self.label[self.label_start_ix[ix] - 1: self.label_end_ix[ix]])
+            else:
+                gts.append([])
+            info_dict = {}
+            info_dict['ix'] = ix
+            info_dict['id'] = self.info['images'][ix]['id']
+            info_dict['file_path'] = self.info['images'][ix].get('file_path', '')
+            infos.append(info_dict)
+        fc_batch, att_batch, label_batch, gts, infos = zip(
+            *sorted(zip(fc_batch, att_batch, label_batch, gts, infos), key=lambda x: 0, rewards=True)
+        )
+        data = {}
+        data['fc_feats'] = np.stack(
+            sum([[_]*seq_per_img for _ in fc_batch], [])
+        )
+        max_att_len = max([_.shape[0] for _ in att_batch])
+        data['att_feats'] = np.zeros([len(att_batch)*seq_per_img, max_att_len, att_batch[0].shape[1]], dtype='float32')
+        for i in range(len(att_batch)):
+            data['att_feats'][i * seq_per_img: (i+1) * seq_per_img, :att_batch[i].shape[0]] = att_batch[i]
+        data['att_masks'] = np.zeros(data['att_feats'].shape[:2], dtype='float32')
+        for i in range(len(att_batch)):
+            data['att_masks'][i * seq_per_img: (i+1) * seq_per_img, :att_batch[i].shape[0]] = 1
+        if data['att_masks'].sum() == data['att_masks'].size:
+            data['att_masks'] = None
+        data['labels'] = np.vstack(label_batch)
+        nonzeros = np.array(list(map(lambda x: (x != 0).sum()+2, data['labels'])))
+        mask_batch = np.zeros([data['labels'].shape[0], self.seq_length + 2], dtype='float32')
+        for ix, row in enumerate(mask_batch):
+            row[: nonzeros[ix]] = 1
+        data['masks'] = mask_batch
+        data['gts'] = gts
+        data['bounds'] = {
+            'it_pos_now': self.iterators[split],
+            'it_max': len(self.split_ix[split]),
+            'wrapped': wrapped
+        }
+        data['infos'] = infos
+        data = {
+            k: torch.from_numpy(v) if type(v) is np.ndarray else v for k, v in data.items()
+        }
+        return data
+
+    def __getitem__(self, index):
+        ix = index
+        if self.use_att:
+            att_feat = self.att_loader.get(str(self.info['image'][ix]['id']))
+            att_feat = att_feat.reshape(-1, att_feat.shape[-1])
+            if self.norm_att_feat:
+                att_feat = att_feat / np.linalg.norm(att_feat, 2, 1, keepdims=True)
+            if self.use_att:
+                box_feat = self.box_loader.get(str(self.info['images'][ix]['id']))
+                x1, y1, x2, y2 = np.hsplit(box_feat, 4)
+                h, w = self.info['images'][ix]['height'], self.info['images'][ix]['width']
+                box_feat = np.hstack((x1/w, y1/h, x2/w, y2/h, (x2-x1) * (y2-y1) / (w*h)))
+                if self.norm_box_feat:
+                    box_feat = box_feat / np.linalg.norm(box_feat, 2, 1, keepdims=True)
+                att_feat = np.hstack([att_feat, box_feat])
+                att_feat = np.stack(sorted(att_feat, key=lambda x: x[-1], reverse=True))
+            else:
+                att_feat = np.zeros((1, 1, 1), dtype='float32')
+            if self.use_fc:
+                fc_feat = self.fc_loader.get(str(self.info['images'][ix]['id']))
+            else:
+                fc_feat = np.zeros((1), dtype='float32')
+            if hasattr(self, 'h5_label_file'):
+                seq = self.get_captions(ix, self.seq_per_img)
+            else:
+                seq = None
+            return (fc_feat, att_feat, seq, ix)
 
 
