@@ -6,6 +6,7 @@ import lmdb
 import os
 import torch
 import six
+import random
 
 class HybridLoader:
     def __init__(self, db_path, ext):
@@ -36,15 +37,19 @@ class HybridLoader:
     def get(self, key):
         if self.db_type == 'pth':
             f_input = self.feat_file[key]
-        elif self.db_type == 'lmdb':
-            env = self.env
-            with env.begin(write=False) as txn:
-                byteflow = txn.get(key)
-            f_input = six.BytesIO(byteflow)
+        # elif self.db_type == 'lmdb':
+        #     env = self.env
+        #     with env.begin(write=False) as txn:
+        #         byteflow = txn.get(key)
+        #     f_input = six.BytesIO(byteflow)
         else:
             f_input = os.path.join(self.db_path, key + self.ext)
         feat = self.loader(f_input)
         return feat
+
+class SubsetSampler(torch.utils.data.sampler.Sampler):
+    def __init__(self, indices):
+        self.indices = indices
 
 class BlobFetcher():
     def __init__(self, split, dataloader, if_shuffle=False):
@@ -52,6 +57,44 @@ class BlobFetcher():
         self.dataloder = dataloader
         self.if_shuffle = if_shuffle
 
+    def reset(self):
+        self.split_loader = iter(
+            data.DataLoader(
+                dataset=self.dataloder,
+                batch_size=1,
+                sampler=SubsetSampler(
+                    self.dataloder.split_ix[self.split][self.dataloder.iterators[self.split]:]
+                ),
+                shuffle=False,
+                pin_memory=True,
+                num_workers=4,
+                collate_fn=lambda x: x[0]
+            )
+        )
+
+    def _get_next_minibatch_inds(self):
+        max_index = len(self.dataloder.split_ix[self.split])
+        wrapped = False
+        ri = self.dataloder.iterators[self.split]
+        ix = self.dataloder.split_ix[self.split][ri]
+        ri_next = ri + 1
+        if ri_next >= max_index:
+            ri_next = 0
+            if self.if_shuffle:
+                random.shuffle(self.dataloder.split_ix[self.split])
+            wrapped = True
+        self.dataloder.iterators[self.split] = ri_next
+        return ix, wrapped
+
+    def get(self):
+        if not hasattr(self, 'split_loader'):
+            self.reset()
+        ix, wrapped = self._get_next_minibatch_inds()
+        tmp = self.split_loader.next()
+        if wrapped:
+            self.reset()
+        assert tmp[-1] == ix, "ix not equal"
+        return tmp + [wrapped]
 
 class DataLoader(data.Dataset):
     def __init__(self, opt):
@@ -106,7 +149,7 @@ class DataLoader(data.Dataset):
         print('assign %d images to split val' % len(self.split_ix['val']))
         print('assign %d images to split test' % len(self.split_ix['test']))
 
-        self.iterators = {'train': 0,'val': 0, 'test': 0}
+        self.iterators = {'train': 0, 'val': 0, 'test': 0}
         self._prefetch_process = {}
         for split in self.iterators.keys():
             self._prefetch_process[split] = BlobFetcher(split, self, split == "train")
@@ -119,6 +162,49 @@ class DataLoader(data.Dataset):
 
     def get_vocab(self):
         return self.ix_to_word
+
+    def get_captions(self, ix, seq_per_img):
+        ix1 = self.label_start_ix[ix] - 1
+        ix2 = self.label_end_ix - 1
+        ncap = ix2 - ix1 + 1
+        assert ncap > 0, 'an image does not have any label. this  can be handled but right now isn\'t'
+        if ncap >= seq_per_img:
+            ixl = random.randint(ix1, ix2 - seq_per_img + 1)
+            seq = self.label[ixl: ixl + seq_per_img, :self.seq_length]
+        # else:
+        #     seq = np.zeros([seq_per_img, self.seq_length], dtype='int')
+        #     for q in range(seq_per_img):
+        #         ixl = random.randint
+        #         seq[q, :] = self.label[ixl, :self.seq_length]
+        return seq
+
+    def __getitem__(self, index):
+        ix = index
+        if self.use_att:
+            att_feat = self.att_loader.get(str(self.info['image'][ix]['id']))
+            att_feat = att_feat.reshape(-1, att_feat.shape[-1])
+            if self.norm_att_feat:
+                att_feat = att_feat / np.linalg.norm(att_feat, 2, 1, keepdims=True)
+            if self.use_att:
+                box_feat = self.box_loader.get(str(self.info['images'][ix]['id']))
+                x1, y1, x2, y2 = np.hsplit(box_feat, 4)
+                h, w = self.info['images'][ix]['height'], self.info['images'][ix]['width']
+                box_feat = np.hstack((x1/w, y1/h, x2/w, y2/h, (x2-x1) * (y2-y1) / (w*h)))
+            #     if self.norm_box_feat:
+            #         box_feat = box_feat / np.linalg.norm(box_feat, 2, 1, keepdims=True)
+            #     att_feat = np.hstack([att_feat, box_feat])
+            #     att_feat = np.stack(sorted(att_feat, key=lambda x: x[-1], reverse=True))
+            # else:
+            #     att_feat = np.zeros((1, 1, 1), dtype='float32')
+            if self.use_fc:
+                fc_feat = self.fc_loader.get(str(self.info['images'][ix]['id']))
+            # else:
+            #     fc_feat = np.zeros((1), dtype='float32')
+            if hasattr(self, 'h5_label_file'):
+                seq = self.get_captions(ix, self.seq_per_img)
+            else:
+                seq = None
+            return (fc_feat, att_feat, seq, ix)
 
     def get_batch(self, split, batch_size=None):
         batch_size = batch_size or self.batch_size
@@ -182,32 +268,6 @@ class DataLoader(data.Dataset):
         }
         return data
 
-    def __getitem__(self, index):
-        ix = index
-        if self.use_att:
-            att_feat = self.att_loader.get(str(self.info['image'][ix]['id']))
-            att_feat = att_feat.reshape(-1, att_feat.shape[-1])
-            if self.norm_att_feat:
-                att_feat = att_feat / np.linalg.norm(att_feat, 2, 1, keepdims=True)
-            if self.use_att:
-                box_feat = self.box_loader.get(str(self.info['images'][ix]['id']))
-                x1, y1, x2, y2 = np.hsplit(box_feat, 4)
-                h, w = self.info['images'][ix]['height'], self.info['images'][ix]['width']
-                box_feat = np.hstack((x1/w, y1/h, x2/w, y2/h, (x2-x1) * (y2-y1) / (w*h)))
-                if self.norm_box_feat:
-                    box_feat = box_feat / np.linalg.norm(box_feat, 2, 1, keepdims=True)
-                att_feat = np.hstack([att_feat, box_feat])
-                att_feat = np.stack(sorted(att_feat, key=lambda x: x[-1], reverse=True))
-            else:
-                att_feat = np.zeros((1, 1, 1), dtype='float32')
-            if self.use_fc:
-                fc_feat = self.fc_loader.get(str(self.info['images'][ix]['id']))
-            else:
-                fc_feat = np.zeros((1), dtype='float32')
-            if hasattr(self, 'h5_label_file'):
-                seq = self.get_captions(ix, self.seq_per_img)
-            else:
-                seq = None
-            return (fc_feat, att_feat, seq, ix)
+
 
 
