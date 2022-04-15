@@ -4,3 +4,4 @@
 * pytorch 1.0  
 * java 1.8.0  
 * tensorboardX  
+* numpy
