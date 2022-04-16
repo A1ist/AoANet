@@ -1,6 +1,7 @@
 import torch.nn as nn
-from .AttModel import AttModel, Attention
+from .AttModel import AttModel, Attention, pack_warpper
 from .TransformerModel import LayerNorm, clones, SubLayerConnection, PositionwiseFeedForward
+import torch
 
 class MultiHeadedDotAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1, scale=1, project_k_v=1, use_output_layer=1, do_aoa=0, norm_q=0, dropout_aoa=0.3):
@@ -98,3 +99,18 @@ class AoAModel(AttModel):
         # else:
         #     self.refiner = lambda x, y: x
         self.core = AoA_Decder_Core(opt)
+    def _prepare_feature(self, fc_feats, att_feats, att_masks):
+        att_feats, att_masks = self.clip_att(att_feats, att_masks)
+        att_feats = pack_warpper(self.att_embed, att_feats, att_masks)
+        # att_feats = self.refiner(att_feats, att_masks)
+        # if self.use_mean_feats:
+        #     if att_masks is None:
+        #         mean_feats = torch.mean(att_feats, dim=1)
+        #     else:
+        #         mean_feats = (
+        #                 torch.sum(att_feats * att_masks.unsqueese(-1), 1) / torch.sum(att_masks.unsqueese(-1), 1)
+        #         )
+        # else:
+        #     mean_feats = self.fc_embed(fc_feats)
+        # p_att_feats = self.ctx2att(att_feats)
+        # return mean_feats, att_feats, p_att_feats, att_masks

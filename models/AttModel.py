@@ -1,5 +1,7 @@
 import torch.nn as nn
 from .CaptionModel import CaptionModel
+import torch
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
 
 bad_endings = ['a', 'an', 'the', 'in', 'for', 'at', 'of', 'with', 'before', 'after', 'on', 'upon', 'near', 'to', 'is', 'are', 'am']
 
@@ -53,6 +55,13 @@ class AttModel(CaptionModel):
         self.vocab = opt.vocab
         self.bad_endings_ix = [int(k) for k, v in self.vocab.items() if v in bad_endings]
 
+    def clip_att(self, att_feats, att_masks):
+        if att_masks is not None:
+            max_len = att_masks.data.long().sum(1).max()
+            att_feats = att_feats[:, :max_len].contiguous()
+            att_masks = att_masks[:, :max_len].contiguous()
+        return att_feats, att_masks
+
 class Attention(nn.Module):
     def __init__(self, opt):
         super(Attention, self).__init__()
@@ -60,3 +69,29 @@ class Attention(nn.Module):
         self.att_hid_size = opt.att_hid_size
         self.h2att = nn.Linear(self.rnn_size, self.att_hid_size)
         self.alpha_net = nn.Linear(self.att_hid_size, 1)
+
+def sort_pack_padded_sequence(input, lengths):
+    sorted_lengths, indices = torch.sort(lengths, descending=True)
+    tmp = pack_padded_sequence(input[indices], sorted_lengths, batch_first=True)
+    inv_ix = indices.clone()
+    inv_ix[indices] = torch.arange(0, len(indices)).type_as(inv_ix)
+    return tmp, inv_ix
+
+def pad_unsort_packed_sequence(input, inv_ix):
+    tmp, _ = pad_packed_sequence(input, batch_fist=True)
+    tmp = tmp[inv_ix]
+    return tmp
+
+def pack_warpper(module, att_feats, att_masks):
+    if att_masks is not None:
+        packed, inv_ix = sort_pack_padded_sequence(
+            att_feats,
+            att_masks.data.long().sum(1)
+        )
+        unsort_sequnce = pad_unsort_packed_sequence(
+            PackedSequence(module(packed[0]), packed[1]),
+            inv_ix
+        )
+        return unsort_sequnce
+    else:
+        return module(att_feats)
