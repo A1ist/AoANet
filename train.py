@@ -3,6 +3,7 @@ from dataloader import *
 import models
 import torch.nn as nn
 from misc.loss_wrapper import LossWrapper
+import opts
 
 try:
     import tensorboardX as tb
@@ -81,8 +82,12 @@ def train(opt):
                         opt.current_lr = opt.learning_rate
                     utils.set_lr(optimizer, opt.learning_lr)
 
+    except (RuntimeError, KeyboardInterrupt):
+        print('Save ckpt on exception ...')
 
 
 
 
-
+if __name__ == '__main__':
+    opt = opts.parse_opt()
+    train(opt)

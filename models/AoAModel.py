@@ -102,15 +102,15 @@ class AoAModel(AttModel):
     def _prepare_feature(self, fc_feats, att_feats, att_masks):
         att_feats, att_masks = self.clip_att(att_feats, att_masks)
         att_feats = pack_warpper(self.att_embed, att_feats, att_masks)
-        # att_feats = self.refiner(att_feats, att_masks)
-        # if self.use_mean_feats:
-        #     if att_masks is None:
-        #         mean_feats = torch.mean(att_feats, dim=1)
-        #     else:
-        #         mean_feats = (
-        #                 torch.sum(att_feats * att_masks.unsqueese(-1), 1) / torch.sum(att_masks.unsqueese(-1), 1)
-        #         )
+        att_feats = self.refiner(att_feats, att_masks)
+        if self.use_mean_feats:
+            if att_masks:
+                mean_feats = (
+                        torch.sum(att_feats * att_masks.unsqueese(-1), 1) / torch.sum(att_masks.unsqueese(-1), 1)
+                )
+            # else:
+            #     mean_feats = torch.mean(att_feats, dim=1)
         # else:
         #     mean_feats = self.fc_embed(fc_feats)
-        # p_att_feats = self.ctx2att(att_feats)
-        # return mean_feats, att_feats, p_att_feats, att_masks
+        p_att_feats = self.ctx2att(att_feats)
+        return mean_feats, att_feats, p_att_feats, att_masks

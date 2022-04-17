@@ -62,6 +62,26 @@ class AttModel(CaptionModel):
             att_masks = att_masks[:, :max_len].contiguous()
         return att_feats, att_masks
 
+    # def _sample_beam(self, fc_feats, att_feats, att_masks, opt):
+
+    def init_hidden(self, bsz):
+        weight = next(self.parameters())
+        weight_reset = weight.new_zeros(self.num_layers, bsz, self.rnn_size)
+        weights = (weight_reset, weight_reset)
+        return weights
+
+    def _sample(self, fc_feats, att_feats, att_masks=None, opt={}):
+        sample_method = opt.get('sample_method', 'greedy')
+        beam_size = opt.get('beam_size', 1)
+        temperature = opt.get('temperature', 1.0)
+        decoding_constraint = opt.get('decoding_constraint', 0)
+        black_trigrams = opt.get('remove_bad_endings', 0)
+        if beam_size > 1:
+            return self._sample_beam(fc_feats, att_feats, att_masks, opt)
+        batch_size = fc_feats.size[0]
+        state = self.init_hidden(batch_size)
+        p_fc_feats, p_att_feats, pp_att_feats, p_att_masks = self._prepare_feature(fc_feats, att_feats, att_masks)
+        
 class Attention(nn.Module):
     def __init__(self, opt):
         super(Attention, self).__init__()
