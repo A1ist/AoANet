@@ -1,6 +1,8 @@
 import torch.nn as nn
 import torch
 import copy
+import math
+import torch.nn.functional as F
 
 class LayerNorm(nn.Module):
     def __init__(self, features, eps=1e-6):
@@ -25,3 +27,14 @@ class PositionwiseFeedForward(nn.Module):
         self.w_2 = nn.Linear(d_ff, d_model)
         self.dropout = nn.Dropout(dropout)
 
+def attention(query, key, value, mask=None, dropout=None):
+    d_k = query.size(-1)
+    scores = torch.matmul(
+        (query, key.transpose(-2, -1)) / math.sqrt(d_k)
+    )
+    if mask is not None:
+        scores = scores.masked_fill(mask == 0, -1e9)
+    p_attn = F.softmax(scores, dim=-1)
+    if dropout is not None:
+        p_attn = dropout(p_attn)
+    return torch.matmul(p_attn, value), p_attn

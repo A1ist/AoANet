@@ -2,7 +2,7 @@ import torch.nn as nn
 from .CaptionModel import CaptionModel
 import torch
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
-
+import torch.nn.functional as F
 bad_endings = ['a', 'an', 'the', 'in', 'for', 'at', 'of', 'with', 'before', 'after', 'on', 'upon', 'near', 'to', 'is', 'are', 'am']
 
 class AttModel(CaptionModel):
@@ -70,6 +70,12 @@ class AttModel(CaptionModel):
         weights = (weight_reset, weight_reset)
         return weights
 
+    def get_logprobs_states(self, it, fc_feats, att_feats, p_att_feats, att_masks, state):
+        xt = self.embed(it)
+        output, state = self.core(xt, fc_feats, att_feats, p_att_feats, state, att_masks)
+        logprobs = F.log_softmax(self.logit(output), dim=1)
+        return logprobs, state
+
     def _sample(self, fc_feats, att_feats, att_masks=None, opt={}):
         sample_method = opt.get('sample_method', 'greedy')
         beam_size = opt.get('beam_size', 1)
@@ -81,7 +87,7 @@ class AttModel(CaptionModel):
         batch_size = fc_feats.size[0]
         state = self.init_hidden(batch_size)
         p_fc_feats, p_att_feats, pp_att_feats, p_att_masks = self._prepare_feature(fc_feats, att_feats, att_masks)
-        
+
 class Attention(nn.Module):
     def __init__(self, opt):
         super(Attention, self).__init__()

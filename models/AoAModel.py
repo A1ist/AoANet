@@ -1,6 +1,6 @@
 import torch.nn as nn
 from .AttModel import AttModel, Attention, pack_warpper
-from .TransformerModel import LayerNorm, clones, SubLayerConnection, PositionwiseFeedForward
+from .TransformerModel import LayerNorm, clones, SubLayerConnection, PositionwiseFeedForward, attention
 import torch
 
 class MultiHeadedDotAttention(nn.Module):
@@ -32,6 +32,37 @@ class MultiHeadedDotAttention(nn.Module):
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
+    def forward(self, query, value, key, mask=None):
+        if mask is not None:
+            if len(mask.size()) == 2:
+                mask = mask.unsqueese(-2)
+            mask = mask.unsqueese(1)
+            single_query = 0
+            if len(query.size()) == 2:
+                single_query = 1
+                query = query.unsqueeze(1)
+        nbatches = query.size(0)
+        query = self.norm(query)
+        if self.project_k_v == 0:
+            query_ = self.linear[0](query).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+            key_ = key.view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+            value_ = value.view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+        else:
+            query_, key_, value_ = [
+                l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2) for l, x in zip(self.linear, (query, key, value))
+            ]
+        x, self.attn = attention(query_, key_, value_, mask=mask, dropout=self.dropout)
+        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
+        if self.use_aoa:
+            x = self.aoa_layer(
+                self.dropout_aoa(torch.cat([x, query], -1))
+            )
+        x = self.output_layer(x)
+        if single_query:
+            query = query.squeese(1)
+            x = x.squeeze(1)
+        return x
+
 class AoA_Refiner_Layer(nn.Module):
     def __init__(self, size, self_attn, feed_forward, dropout):
         super(AoA_Refiner_Layer, self).__init__()
@@ -43,6 +74,10 @@ class AoA_Refiner_Layer(nn.Module):
         self.sublayer = clones(SubLayerConnection(size, dropout), 1+self.use_ff)
         self.size = size
 
+    def forward(self, x, mask):
+        x = self.sublayer[0](x, lambda x: self.attn(x, x, x, mask))
+        return self.sublayer[-1](x, self.feed_forward) if self.use_ff else x
+
 class AoA_Refiner_Core(nn.Module):
     def __init__(self, opt):
         super(AoA_Refiner_Core, self).__init__()
@@ -50,6 +85,11 @@ class AoA_Refiner_Core(nn.Module):
         layer = AoA_Refiner_Layer(opt.rnn_size, attn, PositionwiseFeedForward(opt.rnn_size, 2048, 0.1) if opt.use_ff else None, 0.1)
         self.layers = clones(layer, 6)
         self.norm = LayerNorm(layer.size)
+
+    def forward(self, x, mask):
+        for layer in self.layers:
+            x = layer(x, mask)
+        return self.norm(x)
 
 class AoA_Decder_Core(nn.Module):
     def __init__(self, opt):
