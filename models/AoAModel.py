@@ -124,6 +124,33 @@ class AoA_Decder_Core(nn.Module):
         # else:
         #     self.ctx_drop = lambda x: x
 
+    def forward(self, xt, mean_feats, att_feats, p_att_feats, state, att_masks=None):
+        h_att, c_att = self.att_lstm(
+            torch.cat([xt, mean_feats + self.ctx_drop(state[0][1])], 1), (state[0][0], state[1][0])
+        )
+
+        p_att_feats.narrow(2, 0, self.multi_head_scale * self.d.model), p_att_feats.narrow(2,self.multi_head_scale * self.d_model)
+
+        if self.use_multi_head == 2:
+            att = self.attention(h_att, p_att_feats.narrow(2, 0, self.multi_head_scale * self.d.model), p_att_feats.narrow(2, self.multi_head_scale * self.d_model, self.multi_head_scale * self.d_model), att_masks)
+        else:
+            att = self.attention(h_att, att_feats, p_att_feats, att_masks)
+        ctx_input = torch.cat([att, h_att], 1)
+        if self.decoder_type == 'LSTM':
+            output, c_logic = self.att2ctx(ctx_input, (state[0][1], state[1][1]))
+            state = (
+                torch.stack((h_att, output)), torch.stack((c_att, c_logic))
+            )
+        else:
+            output = self.att2ctx(ctx_input)
+            state = (
+                torch.stack((h_att, output)), torch.stack((c_att, state[1][1]))
+            )
+        if self.out_res:
+            output = output + h_att
+        output = self.out_drop(output)
+        return output, state
+
 class AoAModel(AttModel):
     def __init__(self, opt):
         super(AoAModel, self).__init__(opt)

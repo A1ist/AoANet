@@ -20,6 +20,10 @@ class SubLayerConnection(nn.Module):
         self.norm = LayerNorm(size)
         self.dropout = nn.Dropout(dropout)
 
+    def forward(self, x, multi_attn):
+        add = x + self.dropout(multi_attn(self.norm(x)))
+        return add
+
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
         super(PositionwiseFeedForward, self).__init__()
