@@ -171,7 +171,7 @@ class AoAModel(AttModel):
         att_feats = pack_warpper(self.att_embed, att_feats, att_masks)
         att_feats = self.refiner(att_feats, att_masks)
         if self.use_mean_feats:
-            if att_masks:
+            if att_masks is not None:
                 mean_feats = (
                         torch.sum(att_feats * att_masks.unsqueese(-1), 1) / torch.sum(att_masks.unsqueese(-1), 1)
                 )

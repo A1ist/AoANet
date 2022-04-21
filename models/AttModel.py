@@ -129,6 +129,19 @@ class AttModel(CaptionModel):
             #     logprobs = logprobs + (mask * -0.693 * alpha)
             # if t == self.seq_length:
             #     break
+            if t == self.seq_length:
+                break
+            it, sampleLogprobs = self.sample_next_word(logprobs, sample_method, temperature)
+            if t == 0:
+                unfinished = it > 0
+            else:
+                unfinished = unfinished * (it > 0)
+            it = it * unfinished * (it > 0)
+            seq[:, t] = it
+            seqLogprobs[:, t] = sampleLogprobs.view(-1)
+            if unfinished.sum() == 0:
+                break
+        return seq, seqLogprobs
 
 class Attention(nn.Module):
     def __init__(self, opt):
