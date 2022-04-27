@@ -4,6 +4,9 @@ import models
 import torch.nn as nn
 from misc.loss_wrapper import LossWrapper
 import opts
+from misc.rewards import init_scorer
+import time
+from misc.loss_wrapper import LossWrapper
 
 try:
     import tensorboardX as tb
@@ -81,6 +84,44 @@ def train(opt):
                     else:
                         opt.current_lr = opt.learning_rate
                     utils.set_lr(optimizer, opt.learning_lr)
+                if epoch > opt.scheduled_sampling_start and opt.scheduled_sampling_start >= 0:
+                    frac = (epoch - opt.scheduled_sampling_start) // opt.scheduled_sampling_increase_every
+                    opt.ss_prob = min(opt.scheduled_sampling_increase_prob * frac, opt.scheduled_sampling_max_prob)
+                    model.ss_prob = opt.ss_prob
+                if opt.self_critical_after != -1 and epoch >= opt.self_critical_after:
+                    sc_flag = True
+                    init_scorer(opt.cached_tokens)
+                else:
+                    sc_flag = False
+                epoch_done = False
+            start = time.time()
+            if (opt.use_warmup == 1) and (iteration < opt.noamopt_warmup):
+                opt.current_lr = opt.learning_rate * (iteration + 1) / opt.noamopt_warmup
+                utils.set_lr(optimizer, opt.current_lr)
+            data = loader.get_batch('train')
+            print('Read data:', time.time() - start)
+            if (iteration % acc_steps == 0):
+                optimizer.zero_grad()
+            torch.cuda.synchronize()
+            start = time.time()
+            tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['masks'], data['att_masks']]
+            tmp = [_ if _ is None else _.cuda() for _ in tmp]
+            fc_feats, att_feats, labels, masks, att_masks = tmp
+            model_out = dp_lw_model(fc_feats, att_feats, labels, masks, att_masks, data['gts'], torch.arange(0, len(data['gts'])), sc_flag)
+            loss = model_out['loss'].mean()
+            loss_sp = loss / acc_steps
+            loss_sp.backward()
+            if((iteration + 1) % acc_steps == 0):
+                utils.clip_gradient(optimizer, opt.grad_clip)
+                optimizer.step()
+            torch.cuda.synchronize()
+            train_loss = loss.item()
+            end = time.time()
+            if not sc_flag:
+                print("iter {}  (epoch {}), train_loss = {: .3f}, time/batch = {: .3f}".format(iteration, epoch, train_loss, end-start))
+            else:
+                print("iter {}  (epoch {}), avg_reward = {: .3f}, time/batch = {: .3f}".format(iteration, epoch, model_out['reward'].mean, end-start))
+
 
     except (RuntimeError, KeyboardInterrupt):
         print('Save ckpt on exception ...')

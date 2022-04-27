@@ -1,5 +1,5 @@
-from AOANet_C.metrics.ciderD.ciderD import CiderD
-from AOANet_C.metrics.bleu.bleu import Bleu
+from AoANet_C.metrics.ciderD.ciderD import CiderD
+from AoANet_C.metrics.bleu.bleu import Bleu
 from collections import OrderedDict
 import numpy as np
 

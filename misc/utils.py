@@ -33,9 +33,23 @@ class LanguageModelCriterion(nn.Module):
     def __init__(self):
         super(LanguageModelCriterion, self).__init__()
 
+def to_contiguous(tensor):
+    if tensor.is_contiguous():
+        return tensor
+    else:
+        return tensor.contiguous()
+
 class RewardCriterion(nn.Module):
     def __init__(self):
         super(RewardCriterion, self).__init__()
+    def forward(self, input, seq, reward):
+        input = to_contiguous(input).view(-1)
+        reward = to_contiguous(reward).view(-1)
+        mask = (seq > 0).float()
+        mask = to_contiguous(torch.cat([mask.new(mask.size(0), 1).fill_(1), mask[:, :-1]], 1)).view(-1)
+        output = -input * reward * mask
+        output = torch.sum(output) / torch.sum(mask)
+        return output
 
 class NoamOpt(object):
     def __init__(self, model_size, factor, warmup, optimizer):
@@ -120,3 +134,13 @@ class ReduceLROnPlateau(object):
         self.optimizer = optimizer
         self.current_lr = get_lr(optimizer)
 
+def pickle_dump(obj, f):
+    if six.PY3:
+        return cPickle.dump(obj, f, protocol=2)
+    else:
+        return cPickle.dump(obj, f)
+
+def clip_gradient(optimizer, grad_clip):
+    for group in optimizer.param_grous:
+        for param in group['params']:
+            param.grad.data.clamp_(-grad_clip, grad_clip)
