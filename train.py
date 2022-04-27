@@ -7,6 +7,7 @@ import opts
 from misc.rewards import init_scorer
 import time
 from misc.loss_wrapper import LossWrapper
+from misc.utils import add_summary_value
 
 try:
     import tensorboardX as tb
@@ -56,7 +57,7 @@ def train(opt):
     opt.vocab = loader.get_vocab()
     model = models.setup(opt).cuda()
     del opt.vocab
-    de_model = nn.DataParallel(model)
+    dp_model = nn.DataParallel(model)
     lw_model = LossWrapper(model, opt)
     dp_lw_model = nn.DataParallel(lw_model)
     epoch_done = True
@@ -84,24 +85,30 @@ def train(opt):
                     else:
                         opt.current_lr = opt.learning_rate
                     utils.set_lr(optimizer, opt.learning_lr)
+
                 if epoch > opt.scheduled_sampling_start and opt.scheduled_sampling_start >= 0:
                     frac = (epoch - opt.scheduled_sampling_start) // opt.scheduled_sampling_increase_every
                     opt.ss_prob = min(opt.scheduled_sampling_increase_prob * frac, opt.scheduled_sampling_max_prob)
                     model.ss_prob = opt.ss_prob
+
                 if opt.self_critical_after != -1 and epoch >= opt.self_critical_after:
                     sc_flag = True
                     init_scorer(opt.cached_tokens)
                 else:
                     sc_flag = False
+
                 epoch_done = False
+
             start = time.time()
             if (opt.use_warmup == 1) and (iteration < opt.noamopt_warmup):
                 opt.current_lr = opt.learning_rate * (iteration + 1) / opt.noamopt_warmup
                 utils.set_lr(optimizer, opt.current_lr)
             data = loader.get_batch('train')
             print('Read data:', time.time() - start)
+
             if (iteration % acc_steps == 0):
                 optimizer.zero_grad()
+
             torch.cuda.synchronize()
             start = time.time()
             tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['masks'], data['att_masks']]
@@ -114,13 +121,49 @@ def train(opt):
             if((iteration + 1) % acc_steps == 0):
                 utils.clip_gradient(optimizer, opt.grad_clip)
                 optimizer.step()
-            torch.cuda.synchronize()
+                torch.cuda.synchronize()
             train_loss = loss.item()
             end = time.time()
+
             if not sc_flag:
                 print("iter {}  (epoch {}), train_loss = {: .3f}, time/batch = {: .3f}".format(iteration, epoch, train_loss, end-start))
             else:
                 print("iter {}  (epoch {}), avg_reward = {: .3f}, time/batch = {: .3f}".format(iteration, epoch, model_out['reward'].mean, end-start))
+
+            iteration += 1
+            if data['bounds']['wrapped']:
+                epoch += 1
+                epoch_done = True
+
+            if (iteration % opt.losses_log_every == 0):
+                add_summary_value(tb_summary_writer, 'train_loss', train_loss, iteration)
+                if opt.noamopt:
+                    opt.current_lr = optimizer.rate()
+                elif opt.reduce_on_plateau:
+                    opt.current_lr = optimizer.current_lr
+                add_summary_value(tb_summary_writer, 'learning_rate', opt.current_lr, iteration)
+                add_summary_value(tb_summary_writer, 'scheduled_sampling_prob', model.ss_prob, iteration)
+                if sc_flag:
+                    add_summary_value(tb_summary_writer, 'avg_reward', model_out['reward'].mean, iteration)
+                loss_history[iteration] = train_loss if not sc_flag else model_out['reward'].mean()
+                lr_history[iteration] = opt.current_lr
+                ss_prob_history[iteration] = model.ss_prob
+
+            infos['iter'] = iteration
+            infos['epoch'] = epoch
+            infos['iterators'] = loader.iterators
+            infos['split_ix'] = loader.split_ix
+
+            # if (iteration % opt.save_checkpoint_every == 0):
+            #     eval_kwargs = {
+            #         'split': 'val',
+            #         'dataset': opt.input_json
+            #     }
+            #     eval_kwargs.update(vars(opt))
+            #     val_loss, predictions, lang_stats = eval_utils.eval_split(dp_model, lw_model.crit, loader, eval_kwargs)
+
+            if epoch >= opt.max_epochs and opt.max_epochs != -1:
+                break
 
 
     except (RuntimeError, KeyboardInterrupt):

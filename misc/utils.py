@@ -144,3 +144,7 @@ def clip_gradient(optimizer, grad_clip):
     for group in optimizer.param_grous:
         for param in group['params']:
             param.grad.data.clamp_(-grad_clip, grad_clip)
+
+def add_summary_value(writer, key, value, iteration):
+    if writer:
+        writer.add_scalar(key, value, iteration)
