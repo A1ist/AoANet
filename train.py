@@ -8,6 +8,7 @@ from misc.rewards import init_scorer
 import time
 from misc.loss_wrapper import LossWrapper
 from misc.utils import add_summary_value
+import misc.eval_utils as eval_utils
 
 try:
     import tensorboardX as tb
@@ -154,13 +155,13 @@ def train(opt):
             infos['iterators'] = loader.iterators
             infos['split_ix'] = loader.split_ix
 
-            # if (iteration % opt.save_checkpoint_every == 0):
-            #     eval_kwargs = {
-            #         'split': 'val',
-            #         'dataset': opt.input_json
-            #     }
-            #     eval_kwargs.update(vars(opt))
-            #     val_loss, predictions, lang_stats = eval_utils.eval_split(dp_model, lw_model.crit, loader, eval_kwargs)
+            if (iteration % opt.save_checkpoint_every == 0):
+                eval_kwargs = {
+                    'split': 'val',
+                    'dataset': opt.input_json
+                }
+                eval_kwargs.update(vars(opt))
+                val_loss, predictions, lang_stats = eval_utils.eval_split(dp_model, lw_model.crit, loader, eval_kwargs)
 
             if epoch >= opt.max_epochs and opt.max_epochs != -1:
                 break
