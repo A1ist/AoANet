@@ -51,51 +51,6 @@ class SubsetSampler(torch.utils.data.sampler.Sampler):
     def __init__(self, indices):
         self.indices = indices
 
-class BlobFetcher():
-    def __init__(self, split, dataloader, if_shuffle=False):
-        self.split = split
-        self.dataloder = dataloader
-        self.if_shuffle = if_shuffle
-
-    def reset(self):
-        self.split_loader = iter(
-            data.DataLoader(
-                dataset=self.dataloder,
-                batch_size=1,
-                sampler=SubsetSampler(
-                    self.dataloder.split_ix[self.split][self.dataloder.iterators[self.split]:]
-                ),
-                shuffle=False,
-                pin_memory=True,
-                num_workers=4,
-                collate_fn=lambda x: x[0]
-            )
-        )
-
-    def _get_next_minibatch_inds(self):
-        max_index = len(self.dataloder.split_ix[self.split])
-        wrapped = False
-        ri = self.dataloder.iterators[self.split]
-        ix = self.dataloder.split_ix[self.split][ri]
-        ri_next = ri + 1
-        if ri_next >= max_index:
-            ri_next = 0
-            if self.if_shuffle:
-                random.shuffle(self.dataloder.split_ix[self.split])
-            wrapped = True
-        self.dataloder.iterators[self.split] = ri_next
-        return ix, wrapped
-
-    def get(self):
-        if not hasattr(self, 'split_loader'):
-            self.reset()
-        ix, wrapped = self._get_next_minibatch_inds()
-        tmp = self.split_loader.next()
-        if wrapped:
-            self.reset()
-        assert tmp[-1] == ix, "ix not equal"
-        return tmp + [wrapped]
-
 class DataLoader(data.Dataset):
     def __init__(self, opt):
         self.opt = opt
@@ -268,6 +223,55 @@ class DataLoader(data.Dataset):
         }
         return data
 
+    def reset_iterator(self, split):
+        del self._prefetch_process[split]
+        self._prefetch_process[split] = BlobFetcher(split, self, split == 'train')
+        self.iterators[split] = 0
+
+class BlobFetcher():
+    def __init__(self, split, dataloader, if_shuffle=False):
+        self.split = split
+        self.dataloder = dataloader
+        self.if_shuffle = if_shuffle
+
+    def reset(self):
+        self.split_loader = iter(
+            data.DataLoader(
+                dataset=self.dataloder,
+                batch_size=1,
+                sampler=SubsetSampler(
+                    self.dataloder.split_ix[self.split][self.dataloder.iterators[self.split]:]
+                ),
+                shuffle=False,
+                pin_memory=True,
+                num_workers=4,
+                collate_fn=lambda x: x[0]
+            )
+        )
+
+    def _get_next_minibatch_inds(self):
+        max_index = len(self.dataloder.split_ix[self.split])
+        wrapped = False
+        ri = self.dataloder.iterators[self.split]
+        ix = self.dataloder.split_ix[self.split][ri]
+        ri_next = ri + 1
+        if ri_next >= max_index:
+            ri_next = 0
+            if self.if_shuffle:
+                random.shuffle(self.dataloder.split_ix[self.split])
+            wrapped = True
+        self.dataloder.iterators[self.split] = ri_next
+        return ix, wrapped
+
+    def get(self):
+        if not hasattr(self, 'split_loader'):
+            self.reset()
+        ix, wrapped = self._get_next_minibatch_inds()
+        tmp = self.split_loader.next()
+        if wrapped:
+            self.reset()
+        assert tmp[-1] == ix, "ix not equal"
+        return tmp + [wrapped]
 
 
 

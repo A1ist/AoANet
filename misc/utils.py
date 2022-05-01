@@ -3,6 +3,7 @@ from six.moves import cPickle
 import torch.nn as nn
 import torch
 import torch.optim as optim
+import os
 
 def if_use_feat(caption_model):
     if caption_model in ['show_tell', 'all_img', 'fc', 'newfc']:
@@ -148,3 +149,29 @@ def clip_gradient(optimizer, grad_clip):
 def add_summary_value(writer, key, value, iteration):
     if writer:
         writer.add_scalar(key, value, iteration)
+
+bad_endings = ['with', 'in', 'on', 'of', 'a', 'at', 'to', 'for', 'an', 'this', 'his', 'her', 'that', 'the']
+
+def decode_sequence(ix_to_word, seq):
+    N, D = seq.size()
+    out = []
+    for i in range(N):
+        txt = ''
+        for j in range(D):
+            ix = seq[i, j]
+            if ix > 0:
+                if j >= 1:
+                    txt = txt + ' '
+                txt = txt + ix_to_word[str(ix.item())]
+            else:
+                break
+        # if int(os.getenv('REMOVE_BAD_ENDINGS', '0')):
+        #     flag = 0
+        #     words = txt.split(' ')
+        #     for j in range(len(words)):
+        #         if words[-j-1] not in bad_endings:
+        #             flag = -j
+        #             break
+        #     txt = ' '.join(words[0: len(words)+flag])
+        out.append(txt.replace('@@', ''))
+    return out
