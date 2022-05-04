@@ -3,6 +3,19 @@ import torch
 import numpy as np
 import AoANet_C.misc.utils as utils
 
+def language_eval(dataset, preds, model_id, split):
+    if 'coco' in dataset:
+        annFile = 'data/annotations/captions_val2014.json'
+    elif 'flickr30k' in dataset or 'f30k' in dataset:
+        annFile = 'data/f30k_captions_eval.json'
+    from AoANet_C.metrics.coco import COCO
+    from AoANet_C.metrics.eval import COCOEvalCap
+    if not os.path.isdir('eval_results'):
+        os.mkdir('eval_results')
+    cache_path = os.path.join('eval_results/', '.cache_' + model_id + '_' + split + '.json')
+    coco = COCO(annFile)
+
+
 def eval_split(model, crit, loader, eval_kwargs={}):
     verbose = eval_kwargs.get('verbose', True)
     verbose_beam = eval_kwargs.get('verbose_beam', 1)
