@@ -72,9 +72,9 @@ class COCO:
         self.cats = []
         if not annotation_file == None:
             print('loading annotations into memory...')
-            time_t = datetime.datetime.utcnow()              # 返回当前 UTC 日期和时间
-            dataset = json.load(open(annotation_file, 'r'))  # 加载 annotation 文件
-            print(datetime.datetime.utcnow() - time_t)       # 输出加载 annotation 文件所耗时间
+            time_t = datetime.datetime.utcnow()
+            dataset = json.load(open(annotation_file, 'r'))
+            print(datetime.datetime.utcnow() - time_t)
             self.dataset = dataset
             self.createIndex()
 
@@ -84,22 +84,22 @@ class COCO:
         imgToAnns = {ann['image_id']: [] for ann in self.dataset['annotations']}
         anns =      {ann['id']:       [] for ann in self.dataset['annotations']}
         for ann in self.dataset['annotations']:
-            imgToAnns[ann['image_id']] += [ann]  # 以 coco_id (iamge_name) 为 index，重新存储对应的 annotation 信息(image_id, id, caption)
-            anns[ann['id']] = ann                # 以 image_id 为 index，重新存储对应的 annotation 信息(image_id, id, caption)
-        # 以 coco_id (iamge_name) 为index，重新存储对应的 images 信息（license,url,file_name, id, width, height, data_captured）
+            imgToAnns[ann['image_id']] += [ann]
+            anns[ann['id']] = ann
+
         imgs      = {im['id']: {} for im in self.dataset['images']}
         for img in self.dataset['images']:
             imgs[img['id']] = img
 
         cats = []
         catToImgs = []
-        if self.dataset['type'] == 'instances':
-            cats = {cat['id']: [] for cat in self.dataset['categories']}
-            for cat in self.dataset['categories']:
-                cats[cat['id']] = cat
-            catToImgs = {cat['id']: [] for cat in self.dataset['categories']}
-            for ann in self.dataset['annotations']:
-                catToImgs[ann['category_id']] += [ann['image_id']]
+        # if self.dataset['type'] == 'instances':
+        #     cats = {cat['id']: [] for cat in self.dataset['categories']}
+        #     for cat in self.dataset['categories']:
+        #         cats[cat['id']] = cat
+        #     catToImgs = {cat['id']: [] for cat in self.dataset['categories']}
+        #     for ann in self.dataset['annotations']:
+        #         catToImgs[ann['category_id']] += [ann['image_id']]
 
         print('index created!')
 
@@ -109,6 +109,49 @@ class COCO:
         self.catToImgs = catToImgs
         self.imgs = imgs
         self.cats = cats
+
+    def getImgIds(self, imgIds=[], catIds=[]):
+        '''
+        Get img ids that satisfy given filter conditions.
+        :param imgIds (int array) : get imgs for given ids
+        :param catIds (int array) : get imgs with all given cats
+        :return: ids (int array)  : integer array of img ids
+        '''
+        imgIds = imgIds if type(imgIds) == list else [imgIds]
+        catIds = catIds if type(catIds) == list else [catIds]
+
+        if len(imgIds) == len(catIds) == 0:
+            ids = list(self.imgs.keys())
+        # else:
+        #     ids = set(imgIds)
+        #     for catId in catIds:
+        #         if len(ids) == 0:
+        #             ids = set(self.catToImgs[catId])
+        #         else:
+        #             ids &= set(self.catToImgs[catId])
+        return list(ids)
+
+    def loadAnns(self, ids=[]):
+        """
+        Load anns with the specified ids.
+        :param ids (int array)       : integer ids specifying anns
+        :return: anns (object array) : loaded ann objects
+        """
+        if type(ids) == list:
+            return [self.anns[id] for id in ids]
+        elif type(ids) == int:
+            return [self.anns[ids]]
+
+    def loadCats(self, ids=[]):
+        """
+        Load cats with the specified ids.
+        :param ids (int array)       : integer ids specifying cats
+        :return: cats (object array) : loaded cat objects
+        """
+        if type(ids) == list:
+            return [self.cats[id] for id in ids]
+        elif type(ids) == int:
+            return [self.cats[ids]]
 
     def info(self):
         """
@@ -170,48 +213,7 @@ class COCO:
         ids = [cat['id'] for cat in cats]
         return ids
 
-    def getImgIds(self, imgIds=[], catIds=[]):
-        '''
-        Get img ids that satisfy given filter conditions.
-        :param imgIds (int array) : get imgs for given ids
-        :param catIds (int array) : get imgs with all given cats
-        :return: ids (int array)  : integer array of img ids
-        '''
-        imgIds = imgIds if type(imgIds) == list else [imgIds]
-        catIds = catIds if type(catIds) == list else [catIds]
 
-        if len(imgIds) == len(catIds) == 0:
-            ids = list(self.imgs.keys())
-        else:
-            ids = set(imgIds)
-            for catId in catIds:
-                if len(ids) == 0:
-                    ids = set(self.catToImgs[catId])
-                else:
-                    ids &= set(self.catToImgs[catId])
-        return list(ids)
-
-    def loadAnns(self, ids=[]):
-        """
-        Load anns with the specified ids.
-        :param ids (int array)       : integer ids specifying anns
-        :return: anns (object array) : loaded ann objects
-        """
-        if type(ids) == list:
-            return [self.anns[id] for id in ids]
-        elif type(ids) == int:
-            return [self.anns[ids]]
-
-    def loadCats(self, ids=[]):
-        """
-        Load cats with the specified ids.
-        :param ids (int array)       : integer ids specifying cats
-        :return: cats (object array) : loaded cat objects
-        """
-        if type(ids) == list:
-            return [self.cats[id] for id in ids]
-        elif type(ids) == int:
-            return [self.cats[ids]]
 
     def loadImgs(self, ids=[]):
         """

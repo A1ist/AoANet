@@ -12,7 +12,7 @@ def language_eval(dataset, preds, model_id, split):
     from AoANet_C.metrics.eval import COCOEvalCap
     if not os.path.isdir('eval_results'):
         os.mkdir('eval_results')
-    cache_path = os.path.join('eval_results/', '.cache_' + model_id + '_' + split + '.json')
+    cache_path = os.path.join('eval_results/', 'cache_' + model_id + '_' + split + '.json')
     coco = COCO(annFile)
 
 
